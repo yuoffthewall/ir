@@ -873,6 +873,7 @@ static void ir_emit_dessa_moves(ir_ctx *ctx, int b, ir_block *bb)
 			to = (dst != IR_REG_NONE) ?
 				(ir_ref)dst : (ir_ref)(IR_REG_NUM + ctx->vregs[ref]);
 			if (to != from) {
+				int j, dup = 0;
 				if (to >= IR_REG_NUM
 				 && from >= IR_REG_NUM
 				 && IR_MEM_VAL(ir_vreg_spill_slot(ctx, from - IR_REG_NUM)) ==
@@ -881,6 +882,17 @@ static void ir_emit_dessa_moves(ir_ctx *ctx, int b, ir_block *bb)
 					// TODO: See ext/opcache/tests/jit/gh11917.phpt failure on Linux 32-bit
 					continue;
 				}
+				/* Skip duplicate copies to the same destination that arise when
+				   multiple PHI nodes are coalesced to the same virtual register.
+				   All such copies carry the same value (coalescing invariant),
+				   so keeping any one of them is sufficient. */
+				for (j = 0; j < (int)n; j++) {
+					if (copies[j].to == to) {
+						dup = 1;
+						break;
+					}
+				}
+				if (dup) continue;
 				copies[n].type = insn->type;
 				copies[n].from = from;
 				copies[n].to = to;
