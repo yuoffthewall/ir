@@ -1825,6 +1825,11 @@ static ir_ref ir_promote_i2i(ir_ctx *ctx, ir_type type, ir_ref ref, ir_ref use, 
 			default: IR_ASSERT(0); val.u64 = 0;
 		}
 		return ir_const(ctx, val, type);
+	} else if (insn->op == IR_NOP) {
+		/* Dead instruction - return a zero constant of the target type. */
+		ir_val val;
+		val.u64 = 0;
+		return ir_const(ctx, val, type);
 	} else {
 		ir_bitqueue_add(worklist, ref);
 		switch (insn->op) {
@@ -2071,6 +2076,17 @@ static bool ir_is_cheaper_ext(const ir_ctx *ctx, ir_ref ref, ir_ref loop, ir_ref
 
 static bool ir_try_promote_induction_var_ext(ir_ctx *ctx, ir_ref ext_ref, ir_ref phi_ref, ir_ref op_ref, ir_bitqueue *worklist)
 {
+	// Disable induction variable extension promotion for Wasm.
+    // This optimization promotes i32 loop induction variables to i64,
+    // eliminating ZEXT inside loops. This breaks Wasm's 32-bit integer
+    // wrapping semantics: when an i32 address wraps (0xFFFFFFFF + 1 = 0),
+    // the promoted i64 value becomes 0x100000000 instead.  The ZEXT at
+    // each memory access site is the only thing that enforces 32-bit range,
+    // and SCCP's constant folding removes any AND/TRUNC guard we insert
+    // because they are redundant pre-promotion.  There is no way to emit
+    // IR that both enables the promotion and preserves 32-bit wrapping.
+    return 0;
+
 	ir_op op = ctx->ir_base[ext_ref].op;
 	ir_type type = ctx->ir_base[ext_ref].type;
 	ir_insn *phi_insn;

@@ -773,7 +773,7 @@ int ir_compute_live_ranges(ir_ctx *ctx)
 					} else if (def_flags & IR_DEF_CONFLICTS_WITH_INPUT_REGS) {
 						def_pos = IR_LOAD_LIVE_POS_FROM_REF(ref);
 					} else {
-						if (insn->op == IR_PARAM) {
+						if (insn->op == IR_PARAM && ctx->live_intervals[v]) {
 							/* We may reuse parameter stack slot for spilling */
 							ctx->live_intervals[v]->flags |= IR_LIVE_INTERVAL_MEM_PARAM;
 						}
@@ -782,8 +782,14 @@ int ir_compute_live_ranges(ir_ctx *ctx)
 					/* live.remove(opd) */
 					ir_bitset_excl(live, v);
 					/* intervals[opd].setFrom(op.id) */
-					ival = ir_fix_live_range(ctx, v,
-						IR_START_LIVE_POS_FROM_REF(bb->start), def_pos);
+					ival = ctx->live_intervals[v];
+					if (ival) {
+						ival = ir_fix_live_range(ctx, v,
+							IR_START_LIVE_POS_FROM_REF(bb->start), def_pos);
+					} else {
+						/* Live interval missing - create minimal range. */
+						ival = ir_add_live_range(ctx, v, def_pos, def_pos);
+					}
 					ival->type = insn->type;
 					ir_add_use(ctx, ival, 0, def_pos, reg, def_flags, hint_ref);
 				} else {
@@ -1314,6 +1320,11 @@ int ir_compute_live_ranges(ir_ctx *ctx)
 
 							if (v) {
 								ival = ctx->live_intervals[v];
+								if (!ival) {
+									ival = ir_add_prev_live_range(ctx, v,
+										IR_START_LIVE_POS_FROM_REF(bb->start),
+										IR_END_LIVE_POS_FROM_REF(bb->end));
+								}
 								ir_add_phi_use(ctx, ival, k, IR_DEF_LIVE_POS_FROM_REF(bb->end), use);
 							}
 						}
@@ -1396,15 +1407,21 @@ int ir_compute_live_ranges(ir_ctx *ctx)
 					} else if (def_flags & IR_DEF_CONFLICTS_WITH_INPUT_REGS) {
 						def_pos = IR_LOAD_LIVE_POS_FROM_REF(ref);
 					} else {
-						if (insn->op == IR_PARAM) {
+						if (insn->op == IR_PARAM && ctx->live_intervals[v]) {
 							/* We may reuse parameter stack slot for spilling */
 							ctx->live_intervals[v]->flags |= IR_LIVE_INTERVAL_MEM_PARAM;
 						}
 						def_pos = IR_DEF_LIVE_POS_FROM_REF(ref);
 					}
 					/* intervals[opd].setFrom(op.id) */
-					ival = ir_fix_live_range(ctx, v,
-						IR_START_LIVE_POS_FROM_REF(bb->start), def_pos);
+					ival = ctx->live_intervals[v];
+					if (ival) {
+						ival = ir_fix_live_range(ctx, v,
+							IR_START_LIVE_POS_FROM_REF(bb->start), def_pos);
+					} else {
+						/* Live interval missing - create minimal range. */
+						ival = ir_add_live_range(ctx, v, def_pos, def_pos);
+					}
 					ival->type = insn->type;
 					ir_add_use(ctx, ival, 0, def_pos, reg, def_flags, hint_ref);
 				} else {
