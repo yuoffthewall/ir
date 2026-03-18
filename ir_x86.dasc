@@ -1932,9 +1932,26 @@ static void ir_match_fuse_load(ir_ctx *ctx, ir_ref ref, ir_ref root)
 					return;
 				}
 			} else {
-				ctx->rules[ref] = IR_FUSED | IR_SIMPLE | IR_LOAD;
-				ir_match_fuse_addr(ctx, addr_ref);
-				return;
+				uint32_t addr_rule = ctx->rules[addr_ref];
+
+				if (!addr_rule) {
+					addr_rule = ir_match_insn(ctx, addr_ref);
+					ctx->rules[addr_ref] = addr_rule;
+				}
+				/* Only fuse the load when the address can be handled by
+				 * ir_fuse_addr: LEA-compatible rules or STATIC_ALLOCA.
+				 * At O0 (no IR_OPT_CODEGEN), address ADD is matched as
+				 * IR_BINOP_INT instead of LEA. ir_fuse_addr() cannot
+				 * handle non-LEA rules and the O0 scratch register
+				 * allocator doesn't allocate a register for the fused
+				 * load's address, so fusing would produce wrong code. */
+				if (((addr_rule & IR_RULE_MASK) >= IR_LEA_FIRST &&
+				     (addr_rule & IR_RULE_MASK) <= IR_LEA_LAST) ||
+				    addr_rule == IR_STATIC_ALLOCA) {
+					ctx->rules[ref] = IR_FUSED | IR_SIMPLE | IR_LOAD;
+					ir_match_fuse_addr(ctx, addr_ref);
+					return;
+				}
 			}
 		}
 	}
@@ -1957,9 +1974,20 @@ static bool ir_match_try_fuse_load(ir_ctx *ctx, ir_ref ref, ir_ref root)
 					return 1;
 				}
 			} else {
-				ctx->rules[ref] = IR_FUSED | IR_SIMPLE | IR_LOAD;
-				ir_match_fuse_addr(ctx, addr_ref);
-				return 1;
+				uint32_t addr_rule = ctx->rules[addr_ref];
+
+				if (!addr_rule) {
+					addr_rule = ir_match_insn(ctx, addr_ref);
+					ctx->rules[addr_ref] = addr_rule;
+				}
+				if (((addr_rule & IR_RULE_MASK) >= IR_LEA_FIRST &&
+				     (addr_rule & IR_RULE_MASK) <= IR_LEA_LAST) ||
+				    addr_rule == IR_STATIC_ALLOCA) {
+					ctx->rules[ref] = IR_FUSED | IR_SIMPLE | IR_LOAD;
+					ir_match_fuse_addr(ctx, addr_ref);
+					return 1;
+				}
+				return 0;
 			}
 		}
 	} else if (insn->op == IR_PARAM) {
