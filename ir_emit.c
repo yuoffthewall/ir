@@ -858,6 +858,14 @@ static void ir_emit_dessa_moves(ir_ctx *ctx, int b, ir_block *bb)
 			ir_ref input = ir_insn_op(insn, k);
 			ir_reg src = ir_get_alocated_reg(ctx, ref, k);
 			ir_reg dst = ctx->regs[ref][0];
+
+			/* Skip dead PHIs (no data uses). Their DESSA moves are
+			   unnecessary and can clobber registers holding live values
+			   because the RA assigns dead PHIs minimal live ranges
+			   that may overlap with other intervals. */
+			if (ctx->use_lists[ref].count == 0) {
+				continue;
+			}
 			ir_ref from, to;
 
 			IR_ASSERT(dst == IR_REG_NONE || !IR_REG_SPILLED(dst));
