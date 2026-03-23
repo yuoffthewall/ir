@@ -3180,15 +3180,15 @@ select_register:
 			split_pos = next_use_pos + 1;
 		} else {
 			split_pos = ir_find_optimal_split_position(ctx, ival, ival->range.start, next_use_pos - 1, 1);
-		}
 
-		if (split_pos > ival->range.start) {
-			IR_LOG_LSRA("    ---- Conflict with others", ival, " (all others are used before)");
-			other = ir_split_interval_at(ctx, ival, split_pos);
-			IR_LOG_LSRA("    ---- Spill", ival, "");
-			ir_add_to_unhandled(unhandled, other);
-			IR_LOG_LSRA("    ---- Queue", other, "");
-			return IR_REG_NONE;
+			if (split_pos > ival->range.start) {
+				IR_LOG_LSRA("    ---- Conflict with others", ival, " (all others are used before)");
+				other = ir_split_interval_at(ctx, ival, split_pos);
+				IR_LOG_LSRA("    ---- Spill", ival, "");
+				ir_add_to_unhandled(unhandled, other);
+				IR_LOG_LSRA("    ---- Queue", other, "");
+				return IR_REG_NONE;
+			}
 		}
 	}
 
@@ -3272,7 +3272,7 @@ select_register:
 					IR_LOG_LSRA("      ---- Spill", child, "");
 					ir_add_to_unhandled(unhandled, child2);
 					IR_LOG_LSRA("      ---- Queue", child2, "");
-				} else if (child != other) {
+				} else {
 					// TODO: this may cause endless loop
 					ir_add_to_unhandled(unhandled, child);
 					IR_LOG_LSRA("      ---- Queue", child, "");
@@ -3513,6 +3513,8 @@ static int ir_linear_scan(ir_ctx *ctx, ir_ref vars)
 		position = ival->range.start;
 
 		IR_LOG_LSRA("  ---- Processing", ival, "...");
+
+
 
 		/* for each interval i in active */
 		other = active;
