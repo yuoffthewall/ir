@@ -6749,7 +6749,11 @@ static void ir_emit_cmp_and_branch_int(ir_ctx *ctx, uint32_t b, ir_ref def, ir_i
 
 	bool same_comparison = 0;
 	ir_insn *prev_insn = &ctx->ir_base[insn->op1];
-	if (prev_insn->op == IR_IF_TRUE || prev_insn->op == IR_IF_FALSE) {
+	if ((prev_insn->op == IR_IF_TRUE || prev_insn->op == IR_IF_FALSE)
+	 && insn->op1 == def - 1) {
+		/* The IF is immediately after the block start with no intervening
+		 * instructions that could clobber CPU flags. Safe to reuse flags
+		 * from the dominating IF's comparison. */
 		if (ir_rule(ctx, prev_insn->op1) == IR_CMP_AND_BRANCH_INT) {
 			prev_insn = &ctx->ir_base[prev_insn->op1];
 			prev_insn = &ctx->ir_base[prev_insn->op2];

@@ -1598,7 +1598,6 @@ static bool ir_may_promote_f2d(const ir_ctx *ctx, ir_ref ref)
 static ir_ref ir_promote_d2f(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *worklist)
 {
 	ir_insn *insn = &ctx->ir_base[ref];
-	uint32_t count;
 
 	IR_ASSERT(insn->type == IR_DOUBLE);
 	if (IR_IS_CONST_REF(ref)) {
@@ -1607,26 +1606,23 @@ static ir_ref ir_promote_d2f(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *w
 		ir_bitqueue_add(worklist, ref);
 		switch (insn->op) {
 			case IR_FP2FP:
-				count = ctx->use_lists[ref].count;
-				ir_use_list_remove_all(ctx, ref, use);
+				/* Remove exactly one use per call.  The callers
+				 * (ir_promote_i2i/d2f/f2d for PHI) iterate over
+				 * PHI slots one at a time, so each call must
+				 * handle only one slot.  Using remove_all here
+				 * was wrong: when the same node appeared in N
+				 * PHI slots, the first call removed all N entries
+				 * and NOP'd the node, causing slots 2..N to see
+				 * IR_NOP and return a zero constant instead of
+				 * the correct source operand. */
+				ir_use_list_remove_one(ctx, ref, use);
 				if (ctx->use_lists[ref].count == 0) {
 					ir_use_list_replace_one(ctx, insn->op1, ref, use);
-					if (count > 1) {
-						do {
-							ir_use_list_add(ctx, insn->op1, use);
-						} while (--count > 1);
-					}
 					ref = insn->op1;
 					MAKE_NOP(insn);
 					return ref;
 				} else {
 					ir_use_list_add(ctx, insn->op1, use);
-					count -= ctx->use_lists[ref].count;
-					if (count > 1) {
-						do {
-							ir_use_list_add(ctx, insn->op1, use);
-						} while (--count > 1);
-					}
 				}
 				return insn->op1;
 //			case IR_INT2FP:
@@ -1662,7 +1658,6 @@ static ir_ref ir_promote_d2f(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *w
 static ir_ref ir_promote_f2d(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *worklist)
 {
 	ir_insn *insn = &ctx->ir_base[ref];
-	uint32_t count;
 	ir_ref old_ref;
 
 	IR_ASSERT(insn->type == IR_FLOAT);
@@ -1672,26 +1667,23 @@ static ir_ref ir_promote_f2d(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *w
 		ir_bitqueue_add(worklist, ref);
 		switch (insn->op) {
 			case IR_FP2FP:
-				count = ctx->use_lists[ref].count;
-				ir_use_list_remove_all(ctx, ref, use);
+				/* Remove exactly one use per call.  The callers
+				 * (ir_promote_i2i/d2f/f2d for PHI) iterate over
+				 * PHI slots one at a time, so each call must
+				 * handle only one slot.  Using remove_all here
+				 * was wrong: when the same node appeared in N
+				 * PHI slots, the first call removed all N entries
+				 * and NOP'd the node, causing slots 2..N to see
+				 * IR_NOP and return a zero constant instead of
+				 * the correct source operand. */
+				ir_use_list_remove_one(ctx, ref, use);
 				if (ctx->use_lists[ref].count == 0) {
 					ir_use_list_replace_one(ctx, insn->op1, ref, use);
-					if (count > 1) {
-						do {
-							ir_use_list_add(ctx, insn->op1, use);
-						} while (--count > 1);
-					}
 					ref = insn->op1;
 					MAKE_NOP(insn);
 					return ref;
 				} else {
 					ir_use_list_add(ctx, insn->op1, use);
-					count -= ctx->use_lists[ref].count;
-					if (count > 1) {
-						do {
-							ir_use_list_add(ctx, insn->op1, use);
-						} while (--count > 1);
-					}
 				}
 				return insn->op1;
 			case IR_INT2FP:
@@ -1807,7 +1799,6 @@ static bool ir_may_promote_trunc(const ir_ctx *ctx, ir_type type, ir_ref ref)
 static ir_ref ir_promote_i2i(ir_ctx *ctx, ir_type type, ir_ref ref, ir_ref use, ir_bitqueue *worklist)
 {
 	ir_insn *insn = &ctx->ir_base[ref];
-	uint32_t count;
 	ir_ref *p, n, input;
 
 	if (IR_IS_CONST_REF(ref)) {
@@ -1852,26 +1843,23 @@ static ir_ref ir_promote_i2i(ir_ctx *ctx, ir_type type, ir_ref ref, ir_ref use, 
 					return ref;
 				}
 
-				count = ctx->use_lists[ref].count;
-				ir_use_list_remove_all(ctx, ref, use);
+				/* Remove exactly one use per call.  The callers
+				 * (ir_promote_i2i/d2f/f2d for PHI) iterate over
+				 * PHI slots one at a time, so each call must
+				 * handle only one slot.  Using remove_all here
+				 * was wrong: when the same node appeared in N
+				 * PHI slots, the first call removed all N entries
+				 * and NOP'd the node, causing slots 2..N to see
+				 * IR_NOP and return a zero constant instead of
+				 * the correct source operand. */
+				ir_use_list_remove_one(ctx, ref, use);
 				if (ctx->use_lists[ref].count == 0) {
 					ir_use_list_replace_one(ctx, insn->op1, ref, use);
-					if (count > 1) {
-						do {
-							ir_use_list_add(ctx, insn->op1, use);
-						} while (--count > 1);
-					}
 					ref = insn->op1;
 					MAKE_NOP(insn);
 					return ref;
 				} else {
 					ir_use_list_add(ctx, insn->op1, use);
-					count -= ctx->use_lists[ref].count;
-					if (count > 1) {
-						do {
-							ir_use_list_add(ctx, insn->op1, use);
-						} while (--count > 1);
-					}
 				}
 				return insn->op1;
 			case IR_NEG:
