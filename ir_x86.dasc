@@ -7730,7 +7730,14 @@ static void ir_emit_trunc(ir_ctx *ctx, ir_ref def, ir_insn *insn)
 #endif
 		}
 	} else {
-		ir_emit_load_ex(ctx, dst_type, def_reg, insn->op1, def);
+		/* Load the full source type so that the upper bits of the
+		 * destination register are correct.  IR_MAY_REUSE lets the RA
+		 * coalesce the TRUNC result with the source operand, so later
+		 * instructions may read the full register expecting the source
+		 * value.  A narrow load (dst_type) would leave stale data in
+		 * the upper bits, corrupting those later reads.  The spilled
+		 * branch above already reloads src_type for the same reason. */
+		ir_emit_load_ex(ctx, src_type, def_reg, insn->op1, def);
 	}
 	if (IR_REG_SPILLED(ctx->regs[def][0])) {
 		ir_emit_store(ctx, dst_type, def, def_reg);
