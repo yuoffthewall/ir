@@ -1631,6 +1631,7 @@ static ir_ref ir_promote_d2f(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *w
 			case IR_NEG:
 			case IR_ABS:
 				insn->op1 = ir_promote_d2f(ctx, insn->op1, ref, worklist);
+				insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 				insn->type = IR_FLOAT;
 				return ref;
 			case IR_ADD:
@@ -1643,8 +1644,10 @@ static ir_ref ir_promote_d2f(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *w
 					insn->op2 = insn->op1 = ir_promote_d2f(ctx, insn->op1, ref, worklist);
 				} else {
 					insn->op1 = ir_promote_d2f(ctx, insn->op1, ref, worklist);
+					insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 					insn->op2 = ir_promote_d2f(ctx, insn->op2, ref, worklist);
 				}
+				insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 				insn->type = IR_FLOAT;
 				return ref;
 			default:
@@ -1701,6 +1704,7 @@ static ir_ref ir_promote_f2d(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *w
 			case IR_NEG:
 			case IR_ABS:
 				insn->op1 = ir_promote_f2d(ctx, insn->op1, ref, worklist);
+				insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 				insn->type = IR_DOUBLE;
 				return ref;
 			case IR_ADD:
@@ -1713,8 +1717,10 @@ static ir_ref ir_promote_f2d(ir_ctx *ctx, ir_ref ref, ir_ref use, ir_bitqueue *w
 					insn->op2 = insn->op1 = ir_promote_f2d(ctx, insn->op1, ref, worklist);
 				} else {
 					insn->op1 = ir_promote_f2d(ctx, insn->op1, ref, worklist);
+					insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 					insn->op2 = ir_promote_f2d(ctx, insn->op2, ref, worklist);
 				}
+				insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 				insn->type = IR_DOUBLE;
 				return ref;
 			default:
@@ -1866,6 +1872,7 @@ static ir_ref ir_promote_i2i(ir_ctx *ctx, ir_type type, ir_ref ref, ir_ref use, 
 			case IR_ABS:
 			case IR_NOT:
 				insn->op1 = ir_promote_i2i(ctx, type, insn->op1, ref, worklist);
+				insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 				insn->type = type;
 				return ref;
 			case IR_ADD:
@@ -1881,8 +1888,10 @@ static ir_ref ir_promote_i2i(ir_ctx *ctx, ir_type type, ir_ref ref, ir_ref use, 
 					insn->op2 = insn->op1 = ir_promote_i2i(ctx, type, insn->op1, ref, worklist);
 				} else {
 					insn->op1 = ir_promote_i2i(ctx, type, insn->op1, ref, worklist);
+					insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 					insn->op2 = ir_promote_i2i(ctx, type, insn->op2, ref, worklist);
 				}
+				insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 				insn->type = type;
 				return ref;
 //			case IR_DIV:
@@ -1896,19 +1905,24 @@ static ir_ref ir_promote_i2i(ir_ctx *ctx, ir_type type, ir_ref ref, ir_ref use, 
 					insn->op3 = insn->op2 = ir_promote_i2i(ctx, type, insn->op2, ref, worklist);
 				} else {
 					insn->op2 = ir_promote_i2i(ctx, type, insn->op2, ref, worklist);
+					insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 					insn->op3 = ir_promote_i2i(ctx, type, insn->op3, ref, worklist);
 				}
+				insn = &ctx->ir_base[ref]; /* reload – ir_const() may realloc ir_base */
 				insn->type = type;
 				return ref;
-			case IR_PHI:
-				for (p = insn->ops + 2, n = insn->inputs_count - 1; n > 0; p++, n--) {
-					input = *p;
+			case IR_PHI: {
+				ir_ref ic = insn->inputs_count;
+				ir_ref k;
+				for (k = 2; k <= ic; k++) {
+					input = ctx->ir_base[ref].ops[k];
 					if (input != ref) {
-						*p = ir_promote_i2i(ctx, type, input, ref, worklist);
+						ctx->ir_base[ref].ops[k] = ir_promote_i2i(ctx, type, input, ref, worklist);
 					}
 				}
-				insn->type = type;
+				ctx->ir_base[ref].type = type;
 				return ref;
+			}
 			default:
 				break;
 		}
@@ -3597,14 +3611,14 @@ void ir_iter_opt(ir_ctx *ctx, ir_bitqueue *worklist)
 						if (insn->type == IR_FLOAT) {
 							if (ir_may_promote_d2f(ctx, insn->op1)) {
 								ir_ref ref = ir_promote_d2f(ctx, insn->op1, i, worklist);
-								insn->op1 = ref;
+								ctx->ir_base[i].op1 = ref; /* use index – promote may realloc ir_base */
 								ir_iter_replace_insn(ctx, i, ref, worklist);
 								break;
 							}
 						} else {
 							if (ir_may_promote_f2d(ctx, insn->op1)) {
 								ir_ref ref = ir_promote_f2d(ctx, insn->op1, i, worklist);
-								insn->op1 = ref;
+								ctx->ir_base[i].op1 = ref; /* use index – promote may realloc ir_base */
 								ir_iter_replace_insn(ctx, i, ref, worklist);
 								break;
 							}
@@ -3613,18 +3627,19 @@ void ir_iter_opt(ir_ctx *ctx, ir_bitqueue *worklist)
 					case IR_FP2INT:
 						if (ctx->ir_base[insn->op1].type == IR_DOUBLE) {
 							if (ir_may_promote_d2f(ctx, insn->op1)) {
-								insn->op1 = ir_promote_d2f(ctx, insn->op1, i, worklist);
+								ctx->ir_base[i].op1 = ir_promote_d2f(ctx, insn->op1, i, worklist);
 							}
 						} else {
 							if (ir_may_promote_f2d(ctx, insn->op1)) {
-								insn->op1 = ir_promote_f2d(ctx, insn->op1, i, worklist);
+								ctx->ir_base[i].op1 = ir_promote_f2d(ctx, insn->op1, i, worklist);
 							}
 						}
+						insn = &ctx->ir_base[i]; /* reload – promote may realloc ir_base */
 						goto folding;
 					case IR_TRUNC:
 						if (ir_may_promote_trunc(ctx, insn->type, insn->op1)) {
 							ir_ref ref = ir_promote_i2i(ctx, insn->type, insn->op1, i, worklist);
-							insn->op1 = ref;
+							ctx->ir_base[i].op1 = ref; /* use index – promote may realloc ir_base */
 							ir_iter_replace_insn(ctx, i, ref, worklist);
 							break;
 						}
