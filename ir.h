@@ -932,6 +932,7 @@ struct _ir_loader {
 void ir_loader_init(void);
 void ir_loader_free(void);
 int ir_load(ir_loader *loader, FILE *f);
+int ir_load_safe(ir_loader *loader, FILE *f); /* like ir_load but returns 0 on parse error instead of exit(2) */
 
 /* IR LLVM load API (implementation in ir_load_llvm.c) */
 int ir_load_llvm_bitcode(ir_loader *loader, const char *filename);
