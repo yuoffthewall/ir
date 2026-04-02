@@ -2695,11 +2695,19 @@ binop_fp:
 		case IR_ALLOCA:
 			/* alloca() may be used only in functions */
 			if (ctx->flags & IR_FUNCTION) {
-				if (IR_IS_CONST_REF(insn->op2) && ctx->cfg_map[ref] == 1) {
-					ir_insn *val = &ctx->ir_base[insn->op2];
+				if (IR_IS_CONST_REF(insn->op2)) {
+					uint32_t b = ctx->cfg_map[ref];
+					/* Static alloca: constant size AND not inside a loop.
+					 * Block 1 (entry) is always safe. Other non-loop blocks
+					 * are also safe because the alloca executes exactly once
+					 * on every function invocation (it is dominated by entry
+					 * and has no loop back-edges). */
+					if (b == 1 || (b > 0 && ctx->cfg_blocks[b].loop_depth == 0)) {
+						ir_insn *val = &ctx->ir_base[insn->op2];
 
-					if (!IR_IS_SYM_CONST(val->op)) {
-						return IR_STATIC_ALLOCA;
+						if (!IR_IS_SYM_CONST(val->op)) {
+							return IR_STATIC_ALLOCA;
+						}
 					}
 				}
 				ctx->flags |= IR_USE_FRAME_POINTER;

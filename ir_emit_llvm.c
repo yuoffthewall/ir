@@ -290,12 +290,15 @@ static void ir_emit_ref(ir_ctx *ctx, FILE *f, ir_ref ref)
 		} else if (IR_IS_TYPE_FP(insn->type)) {
 			if (insn->type == IR_DOUBLE) {
 				double d = insn->val.d;
-				if (isnan(d)) {
-					fprintf(f, "nan");
+				if (isnan(d) || isinf(d)) {
+					/* LLVM IR requires hex for special FP values. */
+					uint64_t bits;
+					memcpy(&bits, &d, sizeof(bits));
+					fprintf(f, "0x%" PRIX64, bits);
 				} else if (d == 0.0) {
 					fprintf(f, "0.0");
 				} else {
-					double e = log10(d);
+					double e = log10(fabs(d));
 					if (e < -4 || e >= 6) {
 						fprintf(f, "%e", d);
 					} else if (round(d) == d) {
@@ -312,14 +315,11 @@ static void ir_emit_ref(ir_ctx *ctx, FILE *f, ir_ref ref)
 				} else if (d == 0.0) {
 					fprintf(f, "0.0");
 				} else {
-					double e = log10(d);
-					if (e < -4 || e >= 6) {
-						fprintf(f, "%e", d);
-					} else if (round(d) == d) {
-						fprintf(f, "%.0f.0", d);
-					} else {
-						fprintf(f, "%g", d);
-					}
+					/* LLVM requires float constants to round-trip exactly.
+					 * Use hex-double format to guarantee precision. */
+					uint64_t bits;
+					memcpy(&bits, &d, sizeof(bits));
+					fprintf(f, "0x%" PRIX64, bits);
 				}
 			}
 		} else if (insn->op == IR_LABEL) {
@@ -456,6 +456,41 @@ static void ir_emit_binary_op(ir_ctx *ctx, FILE *f, int def, ir_insn *insn, cons
 	fprintf(f, "\n");
 }
 
+/* Emit a shift operation with the shift amount masked to prevent LLVM
+ * undefined behavior.  WebAssembly (and many other IRs) define shifts as
+ * modular: the shift amount is taken mod bit-width.  x86 does this in HW,
+ * so tier-1 native code works naturally, but LLVM IR treats shifts by
+ * >= bit-width as producing poison.  Emit  `and <shift_amt>, (bits-1)`
+ * before the actual shift instruction. */
+static void ir_emit_shift_op(ir_ctx *ctx, FILE *f, int def, ir_insn *insn, const char *op)
+{
+	ir_type type = insn->type;
+	int bits = ir_type_size[type] * 8;
+	int mask = bits - 1;
+	const char *tname = ir_type_llvm_name[type];
+
+	IR_ASSERT(IR_IS_TYPE_INT(type));
+
+	/* Mask the shift amount (op2). */
+	if (IR_IS_CONST_REF(insn->op2)) {
+		/* Constant shift amount: fold the mask at emit time. */
+		uint64_t amt = ctx->ir_base[insn->op2].val.u64 & (uint64_t)mask;
+		ir_emit_def_ref(ctx, f, def);
+		fprintf(f, "%s %s ", op, tname);
+		ir_emit_ref(ctx, f, insn->op1);
+		fprintf(f, ", %" PRIu64 "\n", amt);
+	} else {
+		/* Variable shift amount: emit an AND to mask. */
+		fprintf(f, "\t%%t%d_shamt = and %s ", def, tname);
+		ir_emit_ref(ctx, f, insn->op2);
+		fprintf(f, ", %d\n", mask);
+		ir_emit_def_ref(ctx, f, def);
+		fprintf(f, "%s %s ", op, tname);
+		ir_emit_ref(ctx, f, insn->op1);
+		fprintf(f, ", %%t%d_shamt\n", def);
+	}
+}
+
 static void ir_emit_binary_overflow_op(ir_ctx *ctx, FILE *f, int def, ir_insn *insn,
                                        ir_llvm_intrinsic_id id, ir_bitset used_intrinsics)
 {
@@ -524,7 +559,7 @@ static void ir_emit_bitop(ir_ctx *ctx, FILE *f, int def, ir_insn *insn, ir_llvm_
 		ir_type_llvm_name[type], ir_llvm_intrinsic_desc[id].name, ir_type_llvm_name[type]);
 	ir_emit_ref(ctx, f, insn->op1);
 	if (poison) {
-		fprintf(f, ", 0");
+		fprintf(f, ", i1 0");
 	}
 	fprintf(f, ")\n");
 }
@@ -568,19 +603,21 @@ static void ir_emit_conditional_op(ir_ctx *ctx, FILE *f, int def, ir_insn *insn)
 {
 	ir_type type = ctx->ir_base[insn->op1].type;
 
-	ir_emit_def_ref(ctx, f, def);
 	if (type == IR_BOOL) {
+		ir_emit_def_ref(ctx, f, def);
 		fprintf(f, "select i1 ");
 		ir_emit_ref(ctx, f, insn->op1);
 	} else if (IR_IS_TYPE_FP(type)) {
 		fprintf(f, "\t%%t%d = fcmp une %s ", def, ir_type_llvm_name[type]);
 		ir_emit_ref(ctx, f, insn->op1);
 		fprintf(f, ", 0.0\n");
+		ir_emit_def_ref(ctx, f, def);
 		fprintf(f, "select i1 %%t%d", def);
 	} else {
 		fprintf(f, "\t%%t%d = icmp ne %s ", def, ir_type_llvm_name[type]);
 		ir_emit_ref(ctx, f, insn->op1);
 		fprintf(f, ", 0\n");
+		ir_emit_def_ref(ctx, f, def);
 		fprintf(f, "select i1 %%t%d", def);
 	}
 
@@ -619,12 +656,43 @@ static void ir_emit_abs(ir_ctx *ctx, FILE *f, int def, ir_insn *insn, ir_bitset 
 	}
 }
 
+/* Like ir_get_true_false_blocks() but does NOT call ir_skip_empty_target_blocks.
+ * We emit all blocks (including empty ones as trivial jumps) so that PHI
+ * predecessor labels always resolve. LLVM will optimize away the extra jumps. */
+static void ir_get_true_false_blocks_noskip(const ir_ctx *ctx, uint32_t b,
+                                             uint32_t *true_block, uint32_t *false_block)
+{
+	ir_block *bb;
+	uint32_t *p, use_block;
+
+	*true_block = 0;
+	*false_block = 0;
+	bb = &ctx->cfg_blocks[b];
+	IR_ASSERT(ctx->ir_base[bb->end].op == IR_IF);
+	IR_ASSERT(bb->successors_count == 2);
+	p = &ctx->cfg_edges[bb->successors];
+	use_block = *p;
+	if (ctx->ir_base[ctx->cfg_blocks[use_block].start].op == IR_IF_TRUE) {
+		*true_block = use_block;
+		use_block = *(p+1);
+		IR_ASSERT(ctx->ir_base[ctx->cfg_blocks[use_block].start].op == IR_IF_FALSE);
+		*false_block = use_block;
+	} else {
+		IR_ASSERT(ctx->ir_base[ctx->cfg_blocks[use_block].start].op == IR_IF_FALSE);
+		*false_block = use_block;
+		use_block = *(p+1);
+		IR_ASSERT(ctx->ir_base[ctx->cfg_blocks[use_block].start].op == IR_IF_TRUE);
+		*true_block = use_block;
+	}
+	IR_ASSERT(*true_block && *false_block);
+}
+
 static void ir_emit_if(ir_ctx *ctx, FILE *f, uint32_t b, ir_ref def, ir_insn *insn)
 {
 	ir_type type = ctx->ir_base[insn->op2].type;
 	uint32_t true_block = 0, false_block = 0;
 
-	ir_get_true_false_blocks(ctx, b, &true_block, &false_block);
+	ir_get_true_false_blocks_noskip(ctx, b, &true_block, &false_block);
 
 	// TODO: i1 @llvm.expect.i1(i1 <val>, i1 <expected_val>) ???
 
@@ -695,7 +763,7 @@ static void ir_emit_switch(ir_ctx *ctx, FILE *f, uint32_t b, ir_ref def, ir_insn
 		use_block = *p;
 		use_insn = &ctx->ir_base[ctx->cfg_blocks[use_block].start];
 		if (use_insn->op == IR_CASE_DEFAULT) {
-			fprintf(f, ", label %%l%d", ir_skip_empty_target_blocks(ctx, use_block));
+			fprintf(f, ", label %%l%d", use_block);
 			break;
 		} else {
 			IR_ASSERT(use_insn->op == IR_CASE_VAL || use_insn->op == IR_CASE_RANGE);
@@ -709,7 +777,7 @@ static void ir_emit_switch(ir_ctx *ctx, FILE *f, uint32_t b, ir_ref def, ir_insn
 		if (use_insn->op == IR_CASE_VAL) {
 			fprintf(f, "\t\t%s ", ir_type_llvm_name[type]);
 			ir_emit_ref(ctx, f, use_insn->op2);
-			fprintf(f, ", label %%l%d\n", ir_skip_empty_target_blocks(ctx, use_block));
+			fprintf(f, ", label %%l%d\n", use_block);
 		} else if (use_insn->op == IR_CASE_RANGE) {
 			IR_ASSERT(0 && "IR_CASE_RANGE NIY");
 		} else {
@@ -1012,6 +1080,12 @@ static int ir_emit_func(ir_ctx *ctx, const char *name, FILE *f)
 		bb = &ctx->cfg_blocks[b];
 		IR_ASSERT(!(bb->flags & IR_BB_UNREACHABLE));
 		if ((bb->flags & (IR_BB_START|IR_BB_ENTRY|IR_BB_EMPTY)) == IR_BB_EMPTY) {
+			/* Emit empty blocks as trivial jumps so PHI predecessor labels
+			 * resolve correctly.  LLVM will optimize these away. */
+			if (bb->successors_count > 0) {
+				fprintf(f, "l%d:\n", b);
+				fprintf(f, "\tbr label %%l%d\n", ctx->cfg_edges[bb->successors]);
+			}
 			continue;
 		}
 		if (bb->predecessors_count > 0 || may_be_used_by_phi(ctx, bb)) {
@@ -1120,13 +1194,13 @@ static int ir_emit_func(ir_ctx *ctx, const char *name, FILE *f)
 					ir_emit_abs(ctx, f, i, insn, used_intrinsics);
 					break;
 				case IR_SHL:
-					ir_emit_binary_op(ctx, f, i, insn, "shl", NULL, NULL);
+					ir_emit_shift_op(ctx, f, i, insn, "shl");
 					break;
 				case IR_SHR:
-					ir_emit_binary_op(ctx, f, i, insn, "lshr", NULL, NULL);
+					ir_emit_shift_op(ctx, f, i, insn, "lshr");
 					break;
 				case IR_SAR:
-					ir_emit_binary_op(ctx, f, i, insn, "ashr", NULL, NULL);
+					ir_emit_shift_op(ctx, f, i, insn, "ashr");
 					break;
 				case IR_ROL:
 					ir_emit_rol_ror(ctx, f, i, insn, IR_LLVM_INTR_FSHL_I8, used_intrinsics);
@@ -1150,19 +1224,37 @@ static int ir_emit_func(ir_ctx *ctx, const char *name, FILE *f)
 					IR_ASSERT(IR_IS_TYPE_INT(insn->type));
 					IR_ASSERT(IR_IS_TYPE_INT(ctx->ir_base[insn->op1].type));
 					IR_ASSERT(ir_type_size[insn->type] > ir_type_size[ctx->ir_base[insn->op1].type]);
-					ir_emit_conv(ctx, f, i, insn, "sext");
+					if (insn->type == IR_ADDR && ctx->ir_base[insn->op1].type != IR_ADDR) {
+						ir_emit_conv(ctx, f, i, insn, "inttoptr");
+					} else if (insn->type != IR_ADDR && ctx->ir_base[insn->op1].type == IR_ADDR) {
+						ir_emit_conv(ctx, f, i, insn, "ptrtoint");
+					} else {
+						ir_emit_conv(ctx, f, i, insn, "sext");
+					}
 					break;
 				case IR_ZEXT:
 					IR_ASSERT(IR_IS_TYPE_INT(insn->type));
 					IR_ASSERT(IR_IS_TYPE_INT(ctx->ir_base[insn->op1].type));
 					IR_ASSERT(ir_type_size[insn->type] > ir_type_size[ctx->ir_base[insn->op1].type]);
-					ir_emit_conv(ctx, f, i, insn, "zext");
+					if (insn->type == IR_ADDR && ctx->ir_base[insn->op1].type != IR_ADDR) {
+						ir_emit_conv(ctx, f, i, insn, "inttoptr");
+					} else if (insn->type != IR_ADDR && ctx->ir_base[insn->op1].type == IR_ADDR) {
+						ir_emit_conv(ctx, f, i, insn, "ptrtoint");
+					} else {
+						ir_emit_conv(ctx, f, i, insn, "zext");
+					}
 					break;
 				case IR_TRUNC:
 					IR_ASSERT(IR_IS_TYPE_INT(insn->type));
 					IR_ASSERT(IR_IS_TYPE_INT(ctx->ir_base[insn->op1].type));
 					IR_ASSERT(ir_type_size[insn->type] < ir_type_size[ctx->ir_base[insn->op1].type]);
-					ir_emit_conv(ctx, f, i, insn, "trunc");
+					if (insn->type == IR_ADDR && ctx->ir_base[insn->op1].type != IR_ADDR) {
+						ir_emit_conv(ctx, f, i, insn, "inttoptr");
+					} else if (insn->type != IR_ADDR && ctx->ir_base[insn->op1].type == IR_ADDR) {
+						ir_emit_conv(ctx, f, i, insn, "ptrtoint");
+					} else {
+						ir_emit_conv(ctx, f, i, insn, "trunc");
+					}
 					break;
 				case IR_BITCAST:
 					if (insn->type == IR_ADDR
@@ -1173,6 +1265,22 @@ static int ir_emit_func(ir_ctx *ctx, const char *name, FILE *f)
 					 && IR_IS_TYPE_INT(insn->type)
 					 && insn->type != IR_ADDR) {
 						ir_emit_conv(ctx, f, i, insn, "ptrtoint");
+					} else if (IR_IS_TYPE_INT(insn->type)
+					 && IR_IS_TYPE_INT(ctx->ir_base[insn->op1].type)
+					 && (ir_type_size[insn->type] != ir_type_size[ctx->ir_base[insn->op1].type]
+					     || insn->type == IR_BOOL
+					     || ctx->ir_base[insn->op1].type == IR_BOOL)) {
+						/* Different-sized integer types (including i1↔i8)
+						 * can't use bitcast; use zext/trunc. */
+						if (insn->type == IR_BOOL) {
+							ir_emit_conv(ctx, f, i, insn, "trunc");
+						} else if (ctx->ir_base[insn->op1].type == IR_BOOL) {
+							ir_emit_conv(ctx, f, i, insn, "zext");
+						} else if (ir_type_size[insn->type] > ir_type_size[ctx->ir_base[insn->op1].type]) {
+							ir_emit_conv(ctx, f, i, insn, "zext");
+						} else {
+							ir_emit_conv(ctx, f, i, insn, "trunc");
+						}
 					} else {
 						ir_emit_conv(ctx, f, i, insn, "bitcast");
 					}
@@ -1224,7 +1332,7 @@ static int ir_emit_func(ir_ctx *ctx, const char *name, FILE *f)
 				case IR_END:
 				case IR_LOOP_END:
 					IR_ASSERT(bb->successors_count == 1);
-					target = ir_skip_empty_target_blocks(ctx, ctx->cfg_edges[bb->successors]);
+					target = ctx->cfg_edges[bb->successors];
 					fprintf(f, "\tbr label %%l%d\n", target);
 					break;
 				case IR_IF:
