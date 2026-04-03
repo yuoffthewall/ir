@@ -3893,7 +3893,7 @@ static void assign_regs(ir_ctx *ctx)
 										prev_use_ref = ref;
 									}
 								} else {
-									if ((!prev_use_ref || ctx->cfg_map[prev_use_ref] != ctx->cfg_map[ref])
+									if ((!prev_use_ref || prev_use_ref == ref || ctx->cfg_map[prev_use_ref] != ctx->cfg_map[ref])
 									 && needs_spill_reload(ctx, ival, ctx->cfg_map[ref], available)) {
 										if (!(use_pos->flags & IR_USE_MUST_BE_IN_REG)
 										 && use_pos->hint != reg
