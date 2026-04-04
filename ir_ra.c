@@ -3764,6 +3764,19 @@ static bool needs_spill_reload(ir_ctx *ctx, ir_live_interval *ival, uint32_t b0,
 	return 0;
 }
 
+static bool ir_is_dead_load(ir_ctx *ctx, ir_ref ref)
+{
+	/* Check if the emitter will skip this instruction as a "dead load".
+	 * LOAD/VLOAD instructions with use_lists[ref].count == 1 are skipped
+	 * by the emitter because only the memory ordering output is used,
+	 * not the data value. On x86, load-load ordering is guaranteed by TSO,
+	 * so the load is unnecessary. */
+	ir_op op = ctx->ir_base[ref].op;
+
+	return (op == IR_LOAD || op == IR_LOAD_v || op == IR_VLOAD || op == IR_VLOAD_v)
+		&& ctx->use_lists[ref].count == 1;
+}
+
 static bool needs_spill_load(ir_ctx *ctx, ir_live_interval *ival, ir_use_pos *use_pos)
 {
 	if (use_pos->next
@@ -3923,7 +3936,8 @@ static void assign_regs(ir_ctx *ctx)
 											if (ctx->ir_base[ref].op != IR_SNAPSHOT && !(use_pos->flags & IR_PHI_USE)) {
 												uint32_t use_b = ctx->cfg_map[ref];
 
-												if (ir_ival_covers(ival, IR_SAVE_LIVE_POS_FROM_REF(ctx->cfg_blocks[use_b].end))) {
+												if (ir_ival_covers(ival, IR_SAVE_LIVE_POS_FROM_REF(ctx->cfg_blocks[use_b].end))
+												 && !ir_is_dead_load(ctx, ref)) {
 													ir_bitset_incl(available, use_b);
 												}
 												prev_use_ref = ref;
