@@ -958,12 +958,27 @@ int ir_match(ir_ctx *ctx)
 				}
 				ref = prev_ref[ref];
 				if (ref == start && ctx->cfg_edges[bb->successors] != b) {
-					if (EXPECTED(!(bb->flags & IR_BB_ENTRY))) {
-						bb->flags |= IR_BB_EMPTY;
-					} else if (ctx->flags & IR_MERGE_EMPTY_ENTRIES) {
-						bb->flags |= IR_BB_EMPTY;
-						if (ctx->cfg_edges[bb->successors] == b + 1) {
-							(bb + 1)->flags |= IR_BB_PREV_EMPTY_ENTRY;
+					/* Check if marking this block empty would create
+					 * a cycle through already-marked-empty successors
+					 * (e.g. an empty infinite loop: LOOP_BEGIN-END / BEGIN-LOOP_END) */
+					uint32_t t = ctx->cfg_edges[bb->successors];
+					while (t != b) {
+						ir_block *tb = &ctx->cfg_blocks[t];
+						if ((tb->flags & (IR_BB_START|IR_BB_ENTRY|IR_BB_EMPTY)) == IR_BB_EMPTY
+								&& tb->successors_count == 1) {
+							t = ctx->cfg_edges[tb->successors];
+						} else {
+							break;
+						}
+					}
+					if (t != b) {
+						if (EXPECTED(!(bb->flags & IR_BB_ENTRY))) {
+							bb->flags |= IR_BB_EMPTY;
+						} else if (ctx->flags & IR_MERGE_EMPTY_ENTRIES) {
+							bb->flags |= IR_BB_EMPTY;
+							if (ctx->cfg_edges[bb->successors] == b + 1) {
+								(bb + 1)->flags |= IR_BB_PREV_EMPTY_ENTRY;
+							}
 						}
 					}
 					continue;
