@@ -1295,12 +1295,20 @@ next:
 
 static uint32_t _ir_skip_empty_blocks(const ir_ctx *ctx, uint32_t b)
 {
+	uint32_t steps = 0;
 	while (1) {
 		ir_block *bb = &ctx->cfg_blocks[b];
 
 		if ((bb->flags & (IR_BB_START|IR_BB_ENTRY|IR_BB_EMPTY)) == IR_BB_EMPTY) {
 			IR_ASSERT(bb->successors_count == 1);
 			b = ctx->cfg_edges[bb->successors];
+			if (++steps > ctx->cfg_blocks_count) {
+				/* Cycle of empty blocks — should not happen if
+				 * ir_emit properly prevents marking cycles as empty.
+				 * Return current block as a safety fallback. */
+				IR_ASSERT(0 && "unexpected cycle of empty blocks");
+				return b;
+			}
 		} else {
 			return b;
 		}
