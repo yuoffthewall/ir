@@ -2079,22 +2079,43 @@ static bool ir_is_cheaper_ext(const ir_ctx *ctx, ir_ref ref, ir_ref loop, ir_ref
 
 static bool ir_try_promote_induction_var_ext(ir_ctx *ctx, ir_ref ext_ref, ir_ref phi_ref, ir_ref op_ref, ir_bitqueue *worklist)
 {
-	// Disable induction variable extension promotion for Wasm.
-    // This optimization promotes i32 loop induction variables to i64,
-    // eliminating ZEXT inside loops. This breaks Wasm's 32-bit integer
-    // wrapping semantics: when an i32 address wraps (0xFFFFFFFF + 1 = 0),
-    // the promoted i64 value becomes 0x100000000 instead.  The ZEXT at
-    // each memory access site is the only thing that enforces 32-bit range,
-    // and SCCP's constant folding removes any AND/TRUNC guard we insert
-    // because they are redundant pre-promotion.  There is no way to emit
-    // IR that both enables the promotion and preserves 32-bit wrapping.
-    return 0;
-
 	ir_op op = ctx->ir_base[ext_ref].op;
 	ir_type type = ctx->ir_base[ext_ref].type;
 	ir_insn *phi_insn;
 	ir_use_list *use_list;
 	ir_ref n, *p, use, ext_ref_2 = IR_UNUSED;
+
+	/* Wasm safety (see notes/bugs_sccp_optimization.md, bug 1).  The upstream
+	 * pass unconditionally drops the EXT node after widening the induction
+	 * variable, assuming promoted arithmetic yields zext/sext of the original
+	 * narrow value.  That is false whenever the loop can wrap/underflow: i32
+	 * arithmetic wraps modulo 2^32, the promoted i64 arithmetic does not, so
+	 * the high 32 bits after a wrap differ from what the original ZEXT would
+	 * have produced.  Symptom in WasmEdge: quicksort Sightglass kernel under
+	 * IR_JIT crashes on load(memBase + 0xFFFFFFFFFFFFFFFC) instead of the
+	 * well-defined OOB trap at load(memBase + 0xFFFFFFFC).
+	 *
+	 * We re-enable the pass for the ZEXT case by preserving semantics at the
+	 * former ZEXT sites: instead of replacing the ZEXT with the promoted
+	 * value directly, we replace it with an explicit `AND wide, 0xFFFFFFFF`.
+	 * On x86-64 that AND lowers to a zero-extending 32-bit move (a free
+	 * register rename on modern cores) and fuses with downstream address
+	 * arithmetic, so runtime cost is no worse than the original ZEXT while
+	 * downstream passes still benefit from seeing the wider-type IV.  For
+	 * SEXT, the analogous sign-preserving replacement is more involved and
+	 * not exercised by any current regression, so we conservatively bail out.
+	 */
+	if (op != IR_ZEXT) {
+		return 0;
+	}
+	{
+		ir_type narrow_type = ctx->ir_base[phi_ref].type;
+		if (narrow_type != IR_I32 && narrow_type != IR_U32) {
+			/* Only handle the common i32 -> wider source.  Narrower
+			 * sources would need a different mask value; stay safe. */
+			return 0;
+		}
+	}
 
 	/* Check if we may change the type of the induction variable */
 	use_list = &ctx->use_lists[phi_ref];
@@ -2259,12 +2280,9 @@ static bool ir_try_promote_induction_var_ext(ir_ctx *ctx, ir_ref ext_ref, ir_ref
 		}
 	}
 
-	ir_iter_replace_insn(ctx, ext_ref, ctx->ir_base[ext_ref].op1, worklist);
-
-	if (ext_ref_2) {
-		ir_iter_replace_insn(ctx, ext_ref_2, ctx->ir_base[ext_ref_2].op1, worklist);
-	}
-
+	/* Mutate phi/op_ref types BEFORE creating the mask nodes, so the new
+	 * AND's operand already has the wider type (avoids a transient type
+	 * mismatch the freshly-emitted AND would inherit). */
 	ctx->ir_base[op_ref].type = type;
 
 	phi_insn = &ctx->ir_base[phi_ref];
@@ -2275,6 +2293,33 @@ static bool ir_try_promote_induction_var_ext(ir_ctx *ctx, ir_ref ext_ref, ir_ref
 	} else {
 		ir_ref tmp = ir_ext_ref(ctx, phi_ref, phi_insn->op2, op, type, worklist);
 		ctx->ir_base[phi_ref].op2 = tmp;
+	}
+
+	/* Replace the hoisted ZEXT(s) with `AND wide, 0xFFFFFFFF` instead of
+	 * dropping them.  See the header comment on this function for why. */
+	{
+		ir_val mask_val;
+		ir_ref mask_ref, wide_src, and_ref;
+
+		mask_val.u64 = 0xFFFFFFFFu;
+		mask_ref = ir_const(ctx, mask_val, type);
+
+		wide_src = ctx->ir_base[ext_ref].op1;
+		and_ref = ir_emit2(ctx, IR_OPTX(IR_AND, type, 2), wide_src, mask_ref);
+		/* Record wide_src -> and_ref edge.  Constants aren't tracked. */
+		ir_use_list_add(ctx, wide_src, and_ref);
+		ir_bitqueue_grow(worklist, and_ref + 1);
+		ir_bitqueue_add(worklist, and_ref);
+		ir_iter_replace_insn(ctx, ext_ref, and_ref, worklist);
+
+		if (ext_ref_2) {
+			wide_src = ctx->ir_base[ext_ref_2].op1;
+			and_ref = ir_emit2(ctx, IR_OPTX(IR_AND, type, 2), wide_src, mask_ref);
+			ir_use_list_add(ctx, wide_src, and_ref);
+			ir_bitqueue_grow(worklist, and_ref + 1);
+			ir_bitqueue_add(worklist, and_ref);
+			ir_iter_replace_insn(ctx, ext_ref_2, and_ref, worklist);
+		}
 	}
 
 	return 1;
