@@ -280,10 +280,10 @@ static void ir_emit_ref(ir_ctx *ctx, FILE *f, ir_ref ref)
 			fprintf(f, "@%s", ir_get_str(ctx, insn->val.name));
 		} else if (insn->op == IR_STR) {
 			fprintf(f, "@.str%d", -ref);
-		} else if (insn->op == IR_ADDR) {
+		} else if (insn->type == IR_ADDR) {
 			if (insn->val.addr == 0) {
 				fprintf(f, "null");
-			} else if (insn->op == IR_ADDR) {
+			} else {
 				fprintf(f, "u0x%" PRIxPTR, insn->val.addr);
 //				fprintf(f, "inttoptr(i64 u0x%" PRIxPTR " to ptr)", insn->val.addr);
 			}
@@ -394,7 +394,7 @@ static void ir_emit_unary_not(ir_ctx *ctx, FILE *f, int def, ir_insn *insn)
 		} else {
 			fprintf(f, "icmp eq %s ", ir_type_llvm_name[type]);
 			ir_emit_ref(ctx, f, insn->op1);
-			fprintf(f, ", 0\n");
+			fprintf(f, ", %s\n", type == IR_ADDR ? "null" : "0");
 		}
 	} else {
 		IR_ASSERT(IR_IS_TYPE_INT(type) && type == insn->type);
@@ -616,7 +616,7 @@ static void ir_emit_conditional_op(ir_ctx *ctx, FILE *f, int def, ir_insn *insn)
 	} else {
 		fprintf(f, "\t%%t%d = icmp ne %s ", def, ir_type_llvm_name[type]);
 		ir_emit_ref(ctx, f, insn->op1);
-		fprintf(f, ", 0\n");
+		fprintf(f, ", %s\n", type == IR_ADDR ? "null" : "0");
 		ir_emit_def_ref(ctx, f, def);
 		fprintf(f, "select i1 %%t%d", def);
 	}
@@ -707,7 +707,7 @@ static void ir_emit_if(ir_ctx *ctx, FILE *f, uint32_t b, ir_ref def, ir_insn *in
 	} else {
 		fprintf(f, "\t%%t%d = icmp ne %s ", def, ir_type_llvm_name[type]);
 		ir_emit_ref(ctx, f, insn->op2);
-		fprintf(f, ", 0\n");
+		fprintf(f, ", %s\n", type == IR_ADDR ? "null" : "0");
 		fprintf(f, "\tbr i1 %%t%d", def);
 	}
 	fprintf(f, ", label %%l%d, label %%l%d\n", true_block, false_block);
@@ -729,7 +729,7 @@ static void ir_emit_guard(ir_ctx *ctx, FILE *f, ir_ref def, ir_insn *insn)
 	} else {
 		fprintf(f, "\t%%t%d = icmp ne %s ", def, ir_type_llvm_name[type]);
 		ir_emit_ref(ctx, f, insn->op2);
-		fprintf(f, ", 0\n");
+		fprintf(f, ", %s\n", type == IR_ADDR ? "null" : "0");
 		fprintf(f, "\tbr i1 %%t%d", def);
 	}
 	fprintf(f, ", label %%l%d_true, label %%l%d_false\n", def, def);
