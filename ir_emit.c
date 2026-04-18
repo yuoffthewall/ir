@@ -909,6 +909,75 @@ static void ir_emit_dessa_moves(ir_ctx *ctx, int b, ir_block *bb)
 		}
 	}
 
+	/* Canonicalize spill-slot labels across copies.
+	 *
+	 * The parallel-copy algorithm in ir_dessa_parallel_copy treats each
+	 * (from, to) as abstract labels in a dependency graph. Two different
+	 * virtual registers can legitimately share the same physical spill
+	 * slot (stack-slot coloring over non-overlapping live ranges). In
+	 * that case, distinct label values alias to one memory location, and
+	 * the algorithm fails to sequence the copies correctly — a later
+	 * read from the shared slot sees a prior write.
+	 *
+	 * Example: copy A writes slot S via label L1 (vreg V1), copy B reads
+	 * slot S via label L2 (vreg V2). If A is emitted before B, B's load
+	 * from slot S returns A's freshly stored value, not V2's original.
+	 *
+	 * Fix: before handing the copy list to ir_dessa_parallel_copy, unify
+	 * any two spill labels in copies[] that resolve to the same slot by
+	 * rewriting them to a canonical (lowest) label. The algorithm then
+	 * sees the shared label and forms the correct dependency chain, so
+	 * the read is scheduled before the write (or a scratch is inserted).
+	 */
+	if (n > 1) {
+		int ci, cj;
+		for (ci = 0; ci < (int)n; ci++) {
+			for (cj = ci + 1; cj < (int)n; cj++) {
+				int a, side;
+				ir_ref la_arr[2] = {copies[ci].from, copies[ci].to};
+				ir_ref lb_arr[2] = {copies[cj].from, copies[cj].to};
+				for (a = 0; a < 2; a++) {
+					for (side = 0; side < 2; side++) {
+						ir_ref la = la_arr[a];
+						ir_ref lb = lb_arr[side];
+						if (la >= IR_REG_NUM && lb >= IR_REG_NUM && la != lb) {
+							if (IR_MEM_VAL(ir_vreg_spill_slot(ctx, la - IR_REG_NUM)) ==
+								IR_MEM_VAL(ir_vreg_spill_slot(ctx, lb - IR_REG_NUM))) {
+								ir_ref keep = la < lb ? la : lb;
+								ir_ref drop = la < lb ? lb : la;
+								int ck;
+								for (ck = 0; ck < (int)n; ck++) {
+									if (copies[ck].from == drop) copies[ck].from = keep;
+									if (copies[ck].to == drop) copies[ck].to = keep;
+								}
+								la_arr[0] = copies[ci].from; la_arr[1] = copies[ci].to;
+								lb_arr[0] = copies[cj].from; lb_arr[1] = copies[cj].to;
+							}
+						}
+					}
+				}
+			}
+		}
+		/* After canonicalization, drop self-copies and duplicate (from,to) pairs. */
+		{
+			int out = 0, ci2;
+			for (ci2 = 0; ci2 < (int)n; ci2++) {
+				int is_dup = 0, cj2;
+				if (copies[ci2].from == copies[ci2].to) continue;
+				for (cj2 = 0; cj2 < out; cj2++) {
+					if (copies[cj2].to == copies[ci2].to && copies[cj2].from == copies[ci2].from) {
+						is_dup = 1;
+						break;
+					}
+				}
+				if (is_dup) continue;
+				if (out != ci2) copies[out] = copies[ci2];
+				out++;
+			}
+			n = out;
+		}
+	}
+
 	if (n > 0) {
 		ir_dessa_parallel_copy(ctx, copies, n, tmp_reg, tmp_fp_reg);
 	}
