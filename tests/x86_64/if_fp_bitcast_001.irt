@@ -1,0 +1,26 @@
+--TEST--
+001: IF keeps integer BITCAST condition after SCCP
+--TARGET--
+x86_64
+--ARGS--
+-O2 --dump-size
+--CODE--
+{
+	int32_t c_1 = 1;
+	int32_t c_2 = 0;
+	l_1 = START(l_12);
+	double d_2 = PARAM(l_1, "x", 0);
+	float d_3 = FP2FP(d_2);
+	int32_t d_4 = BITCAST(d_3);
+	l_5 = IF(l_1, d_4);
+	l_6 = IF_TRUE(l_5);
+	l_6_1 = TRAP(l_6);
+	l_7 = END(l_6_1);
+	l_8 = IF_FALSE(l_5);
+	l_9 = END(l_8);
+	l_10 = MERGE(l_7, l_9);
+	int32_t d_11 = PHI(l_10, c_1, c_2);
+	l_12 = RETURN(l_10, d_11);
+}
+--EXPECT--
+code size = 23

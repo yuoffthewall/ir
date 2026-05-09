@@ -3462,13 +3462,20 @@ static void ir_iter_optimize_loop(ir_ctx *ctx, ir_ref loop_ref, ir_insn *loop, i
 	}
 }
 
+static bool ir_iter_can_skip_condition_cast(const ir_ctx *ctx, const ir_insn *insn)
+{
+	if ((insn->op == IR_BITCAST || insn->op == IR_ZEXT || insn->op == IR_SEXT)
+	 && IR_IS_TYPE_INT(insn->type)) {
+		return IR_IS_TYPE_INT(ctx->ir_base[insn->op1].type);
+	}
+	return 0;
+}
+
 static ir_ref ir_iter_optimize_condition(ir_ctx *ctx, ir_ref control, ir_ref condition, bool *swap)
 {
 	ir_insn *condition_insn = &ctx->ir_base[condition];
 
-	while ((condition_insn->op == IR_BITCAST
-	  || condition_insn->op == IR_ZEXT
-	  || condition_insn->op == IR_SEXT)
+	while (ir_iter_can_skip_condition_cast(ctx, condition_insn)
 	 && ctx->use_lists[condition].count == 1) {
 		condition = condition_insn->op1;
 		condition_insn = &ctx->ir_base[condition];
@@ -3500,9 +3507,7 @@ static ir_ref ir_iter_optimize_condition(ir_ctx *ctx, ir_ref control, ir_ref con
 		}
 	}
 
-	while ((condition_insn->op == IR_BITCAST
-	  || condition_insn->op == IR_ZEXT
-	  || condition_insn->op == IR_SEXT)
+	while (ir_iter_can_skip_condition_cast(ctx, condition_insn)
 	 && ctx->use_lists[condition].count == 1) {
 		condition = condition_insn->op1;
 		condition_insn = &ctx->ir_base[condition];
