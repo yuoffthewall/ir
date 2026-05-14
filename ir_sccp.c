@@ -881,8 +881,32 @@ static void ir_sccp_remove_insn(ir_ctx *ctx, const ir_sccp_val *_values, ir_ref 
 		/* we may skip nodes that are going to be removed by SCCP (TOP, CONST and COPY) */
 		if (input > 0 && _values[input].op > IR_COPY) {
 			ir_use_list_remove_one(ctx, input, ref);
-			if (ir_is_dead(ctx, input)) {
-				/* schedule DCE */
+			if (ir_is_dead(ctx, input)
+			 && ctx->ir_base[input].op != IR_PHI) {
+				/* Schedule DCE for the now-dead input — but never for a
+				 * dead PHI. ir_iter_opt(), when it later drops a
+				 * foldable dead node, additionally schedules a dead
+				 * PHI's op1 (the surrounding MERGE / LOOP_BEGIN) for
+				 * CFG re-optimization (see the IR_IS_FOLDABLE_OP /
+				 * IR_PHI branch in ir_iter_opt).
+				 *
+				 * That re-optimization is unsafe when reached via this
+				 * path. ir_sccp_remove_insn() NOPs `ref` without
+				 * unhooking it from the control chain (unlike the
+				 * sibling ir_sccp_replace_insn, which does unhook
+				 * memops via the IR_COMBO_COPY_PROPAGATION block at
+				 * its top). The MERGE / LOOP_BEGIN that owns the dead
+				 * PHI may still be wired to a now-NOP control
+				 * predecessor, so ir_iter_optimize_merge / _loop
+				 * rewrites the loop body against an out-of-sync graph
+				 * and emits IR the downstream code generator
+				 * miscompiles.
+				 *
+				 * Observed on shootout-seqhash at O2: the regalloc /
+				 * spill-area sizing diverges from the prologue's
+				 * sub rsp value, so the function's last call clobbers
+				 * its own return-address slot and the next ret jumps
+				 * to a stack address. */
 				ir_bitqueue_add(worklist, input);
 			}
 		}
