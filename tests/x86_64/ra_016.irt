@@ -1,0 +1,227 @@
+--TEST--
+016: Register Allocation (narrow spill reload must not satisfy wider use)
+--TARGET--
+x86_64
+--ARGS--
+-S
+--CODE--
+{
+	uintptr_t c_1 = 0;
+	bool c_2 = 0;
+	bool c_3 = 1;
+	uintptr_t c_4 = 0x68;
+	uintptr_t c_5 = 0x1728;
+	uint32_t c_6 = 10;
+	uint32_t c_7 = 1;
+	uintptr_t c_8 = func *0x623a833a0290(uintptr_t, uint32_t, uint32_t): void __fastcall;
+	uint32_t c_9 = 1482;
+	uintptr_t c_10 = 0x8;
+	uintptr_t c_11 = 0x10;
+	uintptr_t c_12 = 0x18;
+	uintptr_t c_13 = 0x20;
+	uintptr_t c_14 = 0x28;
+	uintptr_t c_15 = 0x30;
+	uintptr_t c_16 = 0x38;
+	int32_t c_17 = 0;
+	int32_t c_18 = 24;
+	uintptr_t c_19 = 0x27e0;
+	int32_t c_20 = 8;
+	int32_t c_21 = 1;
+	uintptr_t c_22 = 0x2e58;
+	int32_t c_23 = 12;
+	uintptr_t c_24 = 0x2e50;
+	int32_t c_25 = 16;
+	l_1 = START(l_90);
+	uintptr_t d_2 = PARAM(l_1, "exec_env", 1);
+	uintptr_t d_3 = PARAM(l_1, "args", 2);
+	uintptr_t d_4 = ADD(d_2, c_4);
+	uintptr_t d_5, l_5 = LOAD(l_1, d_4);
+	uintptr_t d_6 = ADD(d_5, c_5);
+	uint32_t d_7, l_7 = LOAD(l_5, d_6);
+	bool d_8 = ULT(d_7, c_6);
+	l_9 = IF(l_7, d_8);
+	l_10 = IF_TRUE(l_9);
+	uint32_t d_11 = ADD(d_7, c_7);
+	l_12 = STORE(l_10, d_6, d_11);
+	bool d_13 = EQ(d_11, c_6);
+	l_14 = IF(l_12, d_13);
+	l_15 = IF_TRUE(l_14);
+	l_16 = CALL/3(l_15, c_8, d_2, c_9, d_11);
+	l_18 = END(l_16);
+	l_19 = IF_FALSE(l_14);
+	l_20 = END(l_19);
+	l_21 = MERGE(l_18, l_20);
+	l_22 = END(l_21);
+	l_23 = IF_FALSE(l_9);
+	l_24 = END(l_23);
+	l_25 = MERGE(l_22, l_24);
+	int32_t d_26, l_26 = LOAD(l_25, d_3);
+	uintptr_t d_27 = ADD(d_3, c_10);
+	int32_t d_28, l_28 = LOAD(l_26, d_27);
+	uintptr_t d_29 = ADD(d_3, c_11);
+	int32_t d_30, l_30 = LOAD(l_28, d_29);
+	uintptr_t d_31, l_31 = LOAD(l_30, d_2);
+	uintptr_t d_32 = ADD(d_2, c_10);
+	uint32_t d_33, l_33 = LOAD(l_31, d_32);
+	uintptr_t d_34 = ADD(d_2, c_11);
+	uintptr_t d_35, l_35 = LOAD(l_33, d_34);
+	uintptr_t d_36 = ADD(d_2, c_12);
+	uintptr_t d_37, l_37 = LOAD(l_35, d_36);
+	uintptr_t d_38 = ADD(d_2, c_13);
+	uintptr_t d_39, l_39 = LOAD(l_37, d_38);
+	uintptr_t d_40 = ADD(d_2, c_14);
+	uintptr_t d_41, l_41 = LOAD(l_39, d_40);
+	uintptr_t d_42 = ADD(d_2, c_15);
+	uintptr_t d_43, l_43 = LOAD(l_41, d_42);
+	uintptr_t d_44 = ADD(d_2, c_16);
+	uintptr_t d_45, l_45 = LOAD(l_43, d_44);
+	uintptr_t d_46, l_46 = ALLOCA(l_45, c_18);
+	l_47 = END(l_46);
+	l_48 = LOOP_BEGIN(l_47, l_108);
+	int32_t d_49 = PHI(l_48, d_28, d_107);
+	int32_t d_50 = PHI(l_48, c_17, d_57);
+	uintptr_t d_51 = ADD(d_31, c_19);
+	uintptr_t d_52, l_52 = LOAD(l_48, d_51);
+	l_53 = STORE(l_52, d_46, d_49);
+	uintptr_t d_54 = PROTO(d_52, func (uintptr_t, uintptr_t): int64_t __fastcall);
+	int64_t d_55, l_55 = CALL/2(l_53, d_54, d_2, d_46);
+	int32_t d_57 = TRUNC(d_55);
+	int32_t d_58 = ADD(d_26, c_20);
+	uintptr_t d_59 = ZEXT(d_58);
+	uintptr_t d_60 = ADD(d_59, d_37);
+	uint8_t d_61 = TRUNC(d_30);
+	l_62 = STORE(l_55, d_60, d_61);
+	l_63 = IF(l_62, d_57);
+	l_64 = IF_TRUE(l_63);
+	uintptr_t d_65 = ZEXT(d_57);
+	uintptr_t d_66 = ADD(d_65, d_37);
+	uint8_t d_67, l_67 = LOAD(l_64, d_66);
+	int32_t d_68 = ZEXT(d_67);
+	bool d_69 = EQ(d_68, d_30);
+	int32_t d_70 = ZEXT(d_69);
+	l_71 = IF(l_67, d_70);
+	l_72 = IF_TRUE(l_71);
+	l_73 = END(l_72);
+	l_74 = IF_FALSE(l_71);
+	uintptr_t d_75 = ADD(d_31, c_22);
+	uintptr_t d_76, l_76 = LOAD(l_74, d_75);
+	l_77 = STORE(l_76, d_46, d_26);
+	uintptr_t d_78 = ADD(d_46, c_10);
+	l_79 = STORE(l_77, d_78, d_49);
+	uintptr_t d_80 = ADD(d_46, c_11);
+	l_81 = STORE(l_79, d_80, c_17);
+	uintptr_t d_82 = PROTO(d_76, func (uintptr_t, uintptr_t): int64_t __fastcall);
+	int64_t d_83, l_83 = CALL/2(l_81, d_82, d_2, d_46);
+	int32_t d_85 = TRUNC(d_83);
+	l_86 = END(l_83);
+	l_87 = IF_FALSE(l_63);
+	l_88 = END(l_87);
+	l_89 = MERGE(l_86, l_88);
+	l_90 = RETURN(l_89, null);
+	l_91 = BEGIN(l_73);
+	int32_t d_92 = ADD(d_57, c_23);
+	uintptr_t d_93 = ZEXT(d_92);
+	uintptr_t d_94 = ADD(d_93, d_37);
+	int32_t d_95, l_95 = LOAD(l_91, d_94);
+	uintptr_t d_96 = ADD(d_31, c_24);
+	uintptr_t d_97, l_97 = LOAD(l_95, d_96);
+	l_98 = STORE(l_97, d_46, d_26);
+	l_99 = STORE(l_98, d_78, d_95);
+	l_100 = STORE(l_99, d_80, d_30);
+	uintptr_t d_101 = PROTO(d_97, func (uintptr_t, uintptr_t): int64_t __fastcall);
+	int64_t d_102, l_102 = CALL/2(l_100, d_101, d_2, d_46);
+	int32_t d_104 = ADD(d_57, c_25);
+	uintptr_t d_105 = ZEXT(d_104);
+	uintptr_t d_106 = ADD(d_105, d_37);
+	int32_t d_107, l_107 = LOAD(l_102, d_106);
+	l_108 = LOOP_END(l_107);
+}
+--EXPECT--
+test:
+	pushq %rbx
+	pushq %rbp
+	pushq %r12
+	pushq %r13
+	pushq %r14
+	pushq %r15
+	subq $0x28, %rsp
+	movq %rdi, %rbx
+	movq %rsi, %rbp
+	movq 0x68(%rbx), %rax
+	movl 0x1728(%rax), %ecx
+	cmpl $0xa, %ecx
+	jae .L1
+	leal 1(%rcx), %edx
+	movl %edx, 0x1728(%rax)
+	cmpl $0xa, %edx
+	jne .L1
+	movq %rbx, %rdi
+	movl $0x5ca, %esi
+	movabsq $0x623a833a0290, %rax
+	callq *%rax
+.L1:
+	movl (%rbp), %r12d
+	movl %r12d, 0x18(%rsp)
+	movl 8(%rbp), %r13d
+	movl 0x10(%rbp), %ebp
+	movl %ebp, 0x1c(%rsp)
+	movq (%rbx), %r14
+	movq 0x18(%rbx), %r15
+	leal 8(%r12), %eax
+	movl %eax, %r12d
+	jmp .L3
+	nop
+	nop
+	nop
+	nop
+	nop
+	nop
+.L2:
+	leal 0xc(%rax), %eax
+	movl %eax, %eax
+	movl (%rax, %r15), %eax
+	movq 0x2e50(%r14), %rdx
+	movl 0x18(%rsp), %ebp
+	movl %ebp, (%rsp)
+	movl %eax, 8(%rsp)
+	movl %ecx, 0x10(%rsp)
+	movq %rbx, %rdi
+	movq %rsp, %rsi
+	callq *%rdx
+	movl 0x20(%rsp), %r13d
+	leal 0x10(%r13), %eax
+	movl %eax, %eax
+	movl (%rax, %r15), %r13d
+.L3:
+	movq 0x27e0(%r14), %rax
+	movl %r13d, (%rsp)
+	movq %rbx, %rdi
+	movq %rsp, %rsi
+	callq *%rax
+	movb 0x1c(%rsp), %cl
+	movb %cl, (%r12, %r15)
+	movl %eax, 0x20(%rsp)
+	testl %eax, %eax
+	je .L4
+	movl %eax, %edx
+	movzbl (%rdx, %r15), %esi
+	movl 0x1c(%rsp), %ecx
+	cmpl %ecx, %esi
+	je .L2
+	movq 0x2e58(%r14), %rax
+	movl 0x18(%rsp), %ebp
+	movl %ebp, (%rsp)
+	movl %r13d, 8(%rsp)
+	movl $0, 0x10(%rsp)
+	movq %rbx, %rdi
+	movq %rsp, %rsi
+	callq *%rax
+.L4:
+	addq $0x28, %rsp
+	popq %r15
+	popq %r14
+	popq %r13
+	popq %r12
+	popq %rbp
+	popq %rbx
+	retq

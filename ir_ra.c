@@ -3789,6 +3789,35 @@ static bool needs_spill_load(ir_ctx *ctx, ir_live_interval *ival, ir_use_pos *us
 	return use_pos->next && use_pos->next->op_num != 0;
 }
 
+/* A byte/word reload of a coalesced interval is enough for the narrow use, but
+ * it must not make a wider source value look available later in the block. */
+static bool ir_spill_load_preserves_interval(ir_ctx *ctx, ir_live_interval *ival,
+	ir_use_pos *use_pos)
+{
+	ir_ref ref = IR_LIVE_POS_TO_REF(use_pos->pos);
+	ir_ref input;
+	ir_type input_type;
+
+	if (use_pos->op_num == 0) {
+		return 1;
+	}
+	if (use_pos->hint_ref < 0 && !(use_pos->flags & IR_PHI_USE)) {
+		ref = -use_pos->hint_ref;
+	}
+	input = ir_insn_op(&ctx->ir_base[ref], use_pos->op_num);
+	if (input <= 0 || !ctx->vregs[input]) {
+		return 1;
+	}
+
+	input_type = ctx->ir_base[input].type;
+	if (IR_IS_TYPE_INT(ival->type)
+	 && IR_IS_TYPE_INT(input_type)
+	 && ir_type_size[input_type] < ir_type_size[ival->type]) {
+		return 0;
+	}
+	return 1;
+}
+
 static void ir_set_fused_reg(ir_ctx *ctx, ir_ref root, ir_ref ref_and_op, int8_t reg)
 {
 	char key[10];
@@ -3935,12 +3964,15 @@ static void assign_regs(ir_ctx *ctx)
 											}
 											if (ctx->ir_base[ref].op != IR_SNAPSHOT && !(use_pos->flags & IR_PHI_USE)) {
 												uint32_t use_b = ctx->cfg_map[ref];
+												bool preserves_interval =
+													ir_spill_load_preserves_interval(ctx, top_ival, use_pos);
 
 												if (ir_ival_covers(ival, IR_SAVE_LIVE_POS_FROM_REF(ctx->cfg_blocks[use_b].end))
+												 && preserves_interval
 												 && !ir_is_dead_load(ctx, ref)) {
 													ir_bitset_incl(available, use_b);
 												}
-												prev_use_ref = ref;
+												prev_use_ref = preserves_interval ? ref : IR_UNUSED;
 											}
 										}
 									} else {
