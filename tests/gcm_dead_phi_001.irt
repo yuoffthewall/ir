@@ -1,0 +1,89 @@
+--TEST--
+GCM split ignores unpinned dead PHI uses
+--ARGS--
+-O2 --save-ir-after-gcm
+--CODE--
+{
+	int32_t c_1 = 1;
+	int32_t c_2 = 2;
+	l_1 = START(l_40);
+	int32_t d_2 = PARAM(l_1, "x", 0);
+	int32_t d_3 = PARAM(l_1, "cond", 1);
+	int32_t d_4 = ADD(d_2, c_1);
+	l_5 = IF(l_1, d_3);
+	l_6 = IF_TRUE(l_5);
+	l_7 = END(l_6);
+	l_8 = IF_FALSE(l_5);
+	l_9 = END(l_8);
+	l_10 = MERGE(l_7, l_9);
+	l_11 = END(l_10);
+	l_12 = LOOP_BEGIN(l_11, l_19);
+	int32_t d_13 = PHI(l_12, d_4, d_18);
+	int32_t d_14 = ADD(d_3, c_1);
+	int32_t d_15 = ADD(d_13, c_1);
+	l_16 = IF(l_12, d_14);
+	l_17 = IF_TRUE(l_16);
+	int32_t d_18 = ADD(d_2, c_2);
+	l_19 = LOOP_END(l_17);
+	l_20 = IF_FALSE(l_16);
+	l_21 = IF(l_20, d_3);
+	l_22 = IF_TRUE(l_21);
+	l_23 = END(l_22);
+	l_24 = IF_FALSE(l_21);
+	l_25 = END(l_24);
+	l_26 = MERGE(l_23, l_25);
+	l_27 = IF(l_26, d_3);
+	l_28 = IF_TRUE(l_27);
+	int32_t d_29 = MUL(d_4, d_3);
+	l_30 = END(l_28);
+	l_31 = IF_FALSE(l_27);
+	int32_t d_32 = SUB(d_4, d_3);
+	l_33 = END(l_31);
+	l_34 = MERGE(l_30, l_33);
+	int32_t d_35 = PHI(l_34, d_29, d_32);
+	l_40 = RETURN(l_34, d_35);
+}
+--EXPECT--
+{
+	uintptr_t c_1 = 0;
+	bool c_2 = 0;
+	bool c_3 = 1;
+	int32_t c_4 = 1;
+	int32_t c_5 = 2;
+	l_1 = START(l_36);
+	int32_t d_2 = PARAM(l_1, "x", 0);
+	int32_t d_3 = PARAM(l_1, "cond", 1);
+	int32_t d_4 = ADD(d_2, c_4);
+	NOP;
+	NOP;
+	NOP;
+	NOP;
+	NOP;
+	NOP;
+	l_11 = END(l_1);
+	l_12 = LOOP_BEGIN(l_11, l_19);
+	int32_t d_13 = PHI(l_12, d_4, d_18);
+	int32_t d_14 = ADD(d_3, c_4);
+	NOP;
+	l_16 = IF(l_12, d_14);
+	l_17 = IF_TRUE(l_16);
+	int32_t d_18 = ADD(d_2, c_5);
+	l_19 = LOOP_END(l_17);
+	l_20 = IF_FALSE(l_16);
+	NOP;
+	NOP;
+	NOP;
+	NOP;
+	NOP;
+	NOP;
+	l_27 = IF(l_20, d_3);
+	l_28 = IF_TRUE(l_27);
+	int32_t d_29 = MUL(d_4, d_3);
+	l_30 = END(l_28);
+	l_31 = IF_FALSE(l_27);
+	int32_t d_32 = SUB(d_4, d_3);
+	l_33 = END(l_31);
+	l_34 = MERGE(l_30, l_33);
+	int32_t d_35 = PHI(l_34, d_29, d_32);
+	l_36 = RETURN(l_34, d_35);
+}
