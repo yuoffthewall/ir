@@ -613,6 +613,46 @@ static void ir_emit_dessa_move(ir_ctx *ctx, ir_type type, ir_ref to, ir_ref from
 	}
 }
 
+static void ir_emit_dessa_move_protected_tmp(ir_ctx *ctx, ir_type type, ir_ref to, ir_ref from,
+		ir_reg tmp_reg, ir_reg tmp_fp_reg,
+		bool protect_tmp_reg, ir_type tmp_reg_type,
+		bool protect_tmp_fp_reg, ir_type tmp_fp_reg_type)
+{
+	ir_mem tmp_spill_slot;
+	bool save_tmp = 0;
+	ir_reg tmp = IR_REG_NONE;
+	ir_type save_type = IR_VOID;
+
+	IR_MEM_VAL(tmp_spill_slot) = 0;
+
+	if (to >= IR_REG_NUM && (from >= IR_REG_NUM || IR_IS_CONST_REF(from))) {
+		if (IR_IS_TYPE_INT(type)) {
+			if (protect_tmp_reg && tmp_reg != IR_REG_NONE) {
+				tmp = tmp_reg;
+				save_type = tmp_reg_type;
+				save_tmp = 1;
+			}
+		} else {
+			if (protect_tmp_fp_reg && tmp_fp_reg != IR_REG_NONE) {
+				tmp = tmp_fp_reg;
+				save_type = tmp_fp_reg_type;
+				save_tmp = 1;
+			}
+		}
+	}
+
+	if (save_tmp) {
+		tmp_spill_slot = IR_MEM_BO(IR_REG_STACK_POINTER, IR_IS_TYPE_INT(save_type) ? -16 : -32);
+		ir_emit_store_mem(ctx, save_type, tmp_spill_slot, tmp);
+	}
+
+	ir_emit_dessa_move(ctx, type, to, from, tmp_reg, tmp_fp_reg);
+
+	if (save_tmp) {
+		ir_emit_load_mem(ctx, save_type, tmp, tmp_spill_slot);
+	}
+}
+
 IR_ALWAYS_INLINE void ir_dessa_resolve_cycle(ir_ctx *ctx, int32_t *pred, int32_t *loc, int8_t *types, ir_bitset todo, int32_t to, ir_reg tmp_reg, ir_reg tmp_fp_reg)
 {
 	ir_ref from;
@@ -718,6 +758,8 @@ static int ir_dessa_parallel_copy(ir_ctx *ctx, ir_dessa_copy *copies, int count,
 	ir_type type;
 	uint32_t len;
 	ir_bitset todo, ready, srcs, visited;
+	bool tmp_reg_is_dst = 0, tmp_fp_reg_is_dst = 0;
+	ir_type tmp_reg_type = IR_VOID, tmp_fp_reg_type = IR_VOID;
 
 	if (count == 1) {
 		to = copies[0].to;
@@ -747,6 +789,13 @@ static int ir_dessa_parallel_copy(ir_ctx *ctx, ir_dessa_copy *copies, int count,
 		types[to] = copies[i].type;
 		IR_ASSERT(!ir_bitset_in(todo, to));
 		ir_bitset_incl(todo, to);
+		if (to == tmp_reg) {
+			tmp_reg_is_dst = 1;
+			tmp_reg_type = copies[i].type;
+		} else if (to == tmp_fp_reg) {
+			tmp_fp_reg_is_dst = 1;
+			tmp_fp_reg_type = copies[i].type;
+		}
 	}
 
 	/* temporary registers can't be the same as some of the sources */
@@ -768,10 +817,14 @@ static int ir_dessa_parallel_copy(ir_ctx *ctx, ir_dessa_copy *copies, int count,
 		type = types[to];
 		from = pred[to];
 		if (IR_IS_CONST_REF(from)) {
-			ir_emit_dessa_move(ctx, type, to, from, tmp_reg, tmp_fp_reg);
+			ir_emit_dessa_move_protected_tmp(ctx, type, to, from, tmp_reg, tmp_fp_reg,
+				tmp_reg_is_dst && !ir_bitset_in(todo, tmp_reg), tmp_reg_type,
+				tmp_fp_reg_is_dst && !ir_bitset_in(todo, tmp_fp_reg), tmp_fp_reg_type);
 		} else {
 			int32_t r = loc[from];
-			ir_emit_dessa_move(ctx, type, to, r, tmp_reg, tmp_fp_reg);
+			ir_emit_dessa_move_protected_tmp(ctx, type, to, r, tmp_reg, tmp_fp_reg,
+				tmp_reg_is_dst && !ir_bitset_in(todo, tmp_reg), tmp_reg_type,
+				tmp_fp_reg_is_dst && !ir_bitset_in(todo, tmp_fp_reg), tmp_fp_reg_type);
 			loc[from] = to;
 			if (from == r && ir_bitset_in(todo, from) && from != tmp_reg && from != tmp_fp_reg) {
 				ir_bitset_incl(ready, from);
@@ -794,7 +847,26 @@ static int ir_dessa_parallel_copy(ir_ctx *ctx, ir_dessa_copy *copies, int count,
 			} else if (ir_bitset_in(visited, to)) {
 				/* We found a cycle. Resolve it. */
 				ir_bitset_incl(visited, to);
-				ir_dessa_resolve_cycle(ctx, pred, loc, types, todo, to, tmp_reg, tmp_fp_reg);
+				type = types[pred[to]];
+				if (IR_IS_TYPE_INT(type)) {
+					if (tmp_reg_is_dst && !ir_bitset_in(todo, tmp_reg)) {
+						ir_mem tmp_spill_slot = IR_MEM_BO(IR_REG_STACK_POINTER, -16);
+						ir_emit_store_mem(ctx, tmp_reg_type, tmp_spill_slot, tmp_reg);
+						ir_dessa_resolve_cycle(ctx, pred, loc, types, todo, to, tmp_reg, tmp_fp_reg);
+						ir_emit_load_mem(ctx, tmp_reg_type, tmp_reg, tmp_spill_slot);
+					} else {
+						ir_dessa_resolve_cycle(ctx, pred, loc, types, todo, to, tmp_reg, tmp_fp_reg);
+					}
+				} else {
+					if (tmp_fp_reg_is_dst && !ir_bitset_in(todo, tmp_fp_reg)) {
+						ir_mem tmp_spill_slot = IR_MEM_BO(IR_REG_STACK_POINTER, -32);
+						ir_emit_store_mem(ctx, tmp_fp_reg_type, tmp_spill_slot, tmp_fp_reg);
+						ir_dessa_resolve_cycle(ctx, pred, loc, types, todo, to, tmp_reg, tmp_fp_reg);
+						ir_emit_load_mem(ctx, tmp_fp_reg_type, tmp_fp_reg, tmp_spill_slot);
+					} else {
+						ir_dessa_resolve_cycle(ctx, pred, loc, types, todo, to, tmp_reg, tmp_fp_reg);
+					}
+				}
 				break;
 			}
 			ir_bitset_incl(visited, to);
@@ -810,10 +882,14 @@ static int ir_dessa_parallel_copy(ir_ctx *ctx, ir_dessa_copy *copies, int count,
 		type = types[to];
 		from = pred[to];
 		if (IR_IS_CONST_REF(from)) {
-			ir_emit_dessa_move(ctx, type, to, from, tmp_reg, tmp_fp_reg);
+			ir_emit_dessa_move_protected_tmp(ctx, type, to, from, tmp_reg, tmp_fp_reg,
+				tmp_reg_is_dst && !ir_bitset_in(todo, tmp_reg), tmp_reg_type,
+				tmp_fp_reg_is_dst && !ir_bitset_in(todo, tmp_fp_reg), tmp_fp_reg_type);
 		} else {
 			int32_t r = loc[from];
-			ir_emit_dessa_move(ctx, type, to, r, tmp_reg, tmp_fp_reg);
+			ir_emit_dessa_move_protected_tmp(ctx, type, to, r, tmp_reg, tmp_fp_reg,
+				tmp_reg_is_dst && !ir_bitset_in(todo, tmp_reg), tmp_reg_type,
+				tmp_fp_reg_is_dst && !ir_bitset_in(todo, tmp_fp_reg), tmp_fp_reg_type);
 			loc[from] = to;
 			if (from == r && ir_bitset_in(todo, from)) {
 				ir_bitset_incl(ready, from);
