@@ -218,6 +218,9 @@ static bool ir_split_partially_dead_node(ir_ctx *ctx, ir_ref ref, uint32_t b)
 		use = *p;
 		insn = &ctx->ir_base[use];
 		if (insn->op == IR_PHI) {
+			if (!ctx->cfg_map[use]) {
+				return 0;
+			}
 			ir_ref *p = insn->ops + 2; /* PHI data inputs */
 			ir_ref *q = ctx->ir_base[insn->op1].ops + 1; /* MERGE inputs */
 			ir_ref n = insn->inputs_count - 1;
